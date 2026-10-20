@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-[#11141A]">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EDF DSI - Prometheus & Grafana Supervision Opérationnelle</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Chart.js for Grafana Dashboards -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        edf: {
+                            blue: '#002060',
+                            navy: '#0D1B2A',
+                            orange: '#FF5F00',
+                            amber: '#FF8C00',
+                            slate: '#11141A',
+                            panel: '#181C24',
+                            card: '#1F2430',
+                            border: '#2A303F'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Grafana-style Scrollbar & Layout Tweaks */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #11141A; }
+        ::-webkit-scrollbar-thumb { background: #2A303F; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #FF5F00; }
+
+        .grafana-panel {
+            background-color: #181C24;
+            border: 1px solid #2A303F;
+            border-radius: 8px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .grafana-panel:hover {
+            border-color: #3B4457;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .promql-glow:focus-within {
+            border-color: #FF5F00;
+            box-shadow: 0 0 12px rgba(255, 95, 0, 0.25);
+        }
+
+        .grid-bg {
+            background-size: 30px 30px;
+            background-image: linear-gradient(to right, rgba(42, 48, 63, 0.2) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(42, 48, 63, 0.2) 1px, transparent 1px);
+        }
+    </style>
+</head>
+<body class="h-full text-slate-200 font-sans flex flex-col antialiased bg-[#11141A] grid-bg selection:bg-edf-orange selection:text-white">
+
+    <!-- EDF BRANDING & SUPERVISION HEADER -->
+    <header class="bg-[#0D1B2A] border-b border-edf-border sticky top-0 z-50 shadow-lg">
+        <div class="max-w-[1700px] mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-4">
+            
+            <!-- Logo & Title -->
+            <div class="flex items-center gap-4">
+                <!-- EDF Tri-Color Flame Stylized Icon -->
+                <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-[#002060] via-edf-orange to-amber-400 p-0.5 flex items-center justify-center shadow-md">
+                        <div class="w-full h-full bg-[#0D1B2A] rounded-[7px] flex items-center justify-center">
+                            <i data-lucide="zap" class="w-5 h-5 text-edf-orange fill-edf-orange"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-black text-white text-base tracking-wider">EDF</span>
+                            <span class="text-[10px] bg-edf-orange/20 text-edf-orange border border-edf-orange/40 font-bold px-2 py-0.5 rounded uppercase">DSI & Exploitation</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 font-medium">Prometheus v2.48 + Grafana v10.2 · Infrastructure Metrics</div>
+                    </div>
+                </div>
+
+                <div class="hidden xl:block h-7 w-px bg-edf-border"></div>
+
+                <!-- Environment Switcher -->
+                <div class="hidden sm:flex items-center gap-2">
+                    <i data-lucide="server" class="w-4 h-4 text-slate-400"></i>
+                    <select id="env-selector" onchange="switchEnvironment(this.value)" class="bg-[#181C24] border border-edf-border text-xs text-slate-200 font-medium rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-edf-orange">
+                        <option value="p1">Production: Nuclear-Grid North (Flamanville / Gravelines)</option>
+                        <option value="p2">Production: Hydro-Electric Ops West (Grand'Maison / Rhône)</option>
+                        <option value="p3">Production: Solar & Wind Cloud Fleet (Normandie / PACA)</option>
+                        <option value="p4">Core DataCenters: Paris-Saclay & Lyon Ops</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Operational Status Badges -->
+            <div class="flex items-center gap-3 text-xs">
+                
+                <!-- Targets Scrape Status -->
+                <div class="hidden md:flex items-center gap-2 bg-[#181C24] border border-edf-border px-3 py-1.5 rounded-lg">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span class="text-slate-400">Prometheus Targets:</span>
+                    <strong class="text-emerald-400 font-mono" id="status-target-percent">99.8% UP</strong>
+                </div>
+
+                <!-- Ingestion Rate -->
+                <div class="hidden md:flex items-center gap-2 bg-[#181C24] border border-edf-border px-3 py-1.5 rounded-lg">
+                    <i data-lucide="activity" class="w-3.5 h-3.5 text-edf-orange"></i>
+                    <span class="text-slate-400">Ingestion:</span>
+                    <strong class="text-slate-200 font-mono" id="status-ingest-rate">185.4k ops/s</strong>
+                </div>
+
+                <!-- Active Alerts Counter -->
+                <button onclick="switchTab('alerts')" class="flex items-center gap-2 bg-[#181C24] hover:bg-edf-card border border-edf-border px-3 py-1.5 rounded-lg transition-colors">
+                    <i data-lucide="bell" class="w-3.5 h-3.5 text-amber-400"></i>
+                    <span class="text-slate-400">Alertes:</span>
+                    <span id="header-alert-count" class="bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.5 rounded text-[11px] border border-amber-500/30">2 Actives</span>
+                </button>
+
+                <!-- Clock UTC/Paris -->
+                <div class="bg-[#181C24] border border-edf-border px-3 py-1.5 rounded-lg font-mono text-slate-300 font-medium flex items-center gap-1.5">
+                    <i data-lucide="clock" class="w-3.5 h-3.5 text-slate-400"></i>
+                    <span id="live-clock">14:45:00 UTC</span>
+                </div>
+            </div>
+
+        </div>
+    </header>
+
+    <!-- NAVIGATION TABS & SYSTEM STRESS CONTROLLER -->
+    <section class="bg-[#181C24] border-b border-edf-border">
+        <div class="max-w-[1700px] mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-4">
+            
+            <!-- Navigation Buttons -->
+            <nav class="flex items-center gap-2">
+                <button onclick="switchTab('grafana')" id="tab-btn-grafana" class="px-4 py-2 rounded-lg text-xs font-bold transition-all bg-edf-orange text-white flex items-center gap-2 shadow-md">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
+                    <span>Tableaux de Bord Grafana</span>
+                </button>
+                <button onclick="switchTab('prometheus')" id="tab-btn-prometheus" class="px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white hover:bg-edf-card flex items-center gap-2">
+                    <i data-lucide="terminal" class="w-4 h-4"></i>
+                    <span>Console PromQL & Targets</span>
+                </button>
+                <button onclick="switchTab('alerts')" id="tab-btn-alerts" class="px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white hover:bg-edf-card flex items-center gap-2 relative">
+                    <i data-lucide="shield-alert" class="w-4 h-4"></i>
+                    <span>Alertmanager & Incident Ops</span>
+                    <span class="w-2 h-2 rounded-full bg-amber-400 absolute top-1.5 right-1.5"></span>
+                </button>
+            </nav>
+
+            <!-- Real-time Stress & Load Simulator Controls -->
+            <div class="flex items-center gap-3 bg-[#11141A] px-3.5 py-1.5 rounded-xl border border-edf-border text-xs">
+                <span class="font-bold text-slate-300 flex items-center gap-1.5">
+                    <i data-lucide="gauge" class="w-4 h-4 text-edf-orange"></i>
+                    <span>Simulateur Charge Charge Réseau / Cluster:</span>
+                </span>
+                <input type="range" id="stress-slider" min="0" max="100" value="35" oninput="updateSystemStress(this.value)" class="w-28 sm:w-36 accent-edf-orange cursor-pointer">
+                <span id="stress-value-badge" class="font-mono font-bold text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded">35% Normal</span>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- MAIN DASHBOARD CONTENT AREA -->
+    <main class="max-w-[1700px] mx-auto px-4 py-5 flex-1 w-full space-y-6">
+
+        <!-- TAB 1: GRAFANA DASHBOARDS VIEW -->
+        <div id="tab-grafana" class="space-y-6">
+
+            <!-- Toolbar: Time Filter & Refresh -->
+            <div class="flex flex-wrap items-center justify-between gap-4 bg-edf-panel p-3 rounded-xl border border-edf-border text-xs">
+                <div class="flex items-center gap-2">
+                    <span class="font-extrabold text-white text-sm tracking-tight flex items-center gap-2">
+                        <i data-lucide="line-chart" class="w-4 h-4 text-edf-orange"></i>
+                        EDF Ops Center / Vue Réseau & Clusters IT
+                    </span>
+                    <span class="text-slate-400">| Dashboard UID: <span class="font-mono text-slate-300">edf-prod-grid-01</span></span>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <!-- Time Range Picker -->
+                    <div class="flex items-center bg-[#11141A] rounded-lg border border-edf-border p-1">
+                        <button onclick="setTimeRange('15m')" id="time-15m" class="px-2.5 py-1 rounded text-slate-400 hover:text-white font-medium">15m</button>
+                        <button onclick="setTimeRange('1h')" id="time-1h" class="px-2.5 py-1 rounded bg-edf-orange text-white font-bold shadow">1h</button>
+                        <button onclick="setTimeRange('6h')" id="time-6h" class="px-2.5 py-1 rounded text-slate-400 hover:text-white font-medium">6h</button>
+                        <button onclick="setTimeRange('24h')" id="time-24h" class="px-2.5 py-1 rounded text-slate-400 hover:text-white font-medium">24h</button>
+                        <button onclick="setTimeRange('7d')" id="time-7d" class="px-2.5 py-1 rounded text-slate-400 hover:text-white font-medium">7d</button>
+                    </div>
+
+                    <!-- Live Auto Refresh Toggle -->
+                    <button id="refresh-toggle" onclick="toggleAutoRefresh()" class="bg-[#11141A] hover:bg-edf-card border border-edf-border text-emerald-400 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5 animate-spin"></i>
+                        <span>Live (5s)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Top KPI Cards Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <!-- KPI 1: Grid Output -->
+                <div class="grafana-panel p-4 space-y-2 relative overflow-hidden">
+                    <div class="flex justify-between items-start text-xs">
+                        <span class="text-slate-400 font-bold uppercase tracking-wider">Production Électrique Totale</span>
+                        <i data-lucide="zap" class="w-4 h-4 text-edf-orange"></i>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-3xl font-black font-mono text-white" id="kpi-power-val">42.85</span>
+                        <span class="text-xs font-bold text-slate-400">GW</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] pt-1">
+                        <span class="text-emerald-400 flex items-center gap-1 font-bold">
+                            <i data-lucide="trending-up" class="w-3 h-3"></i> +1.4% vs h-1
+                        </span>
+                        <span class="text-slate-500 font-mono">Target: 45.0 GW</span>
+                    </div>
+                    <!-- Sparkline Canvas -->
+                    <div class="h-8 w-full mt-2">
+                        <canvas id="sparkline-power"></canvas>
+                    </div>
+                </div>
+
+                <!-- KPI 2: Compute CPU Load -->
+                <div class="grafana-panel p-4 space-y-2 relative overflow-hidden">
+                    <div class="flex justify-between items-start text-xs">
+                        <span class="text-slate-400 font-bold uppercase tracking-wider">Kubernetes Node CPU Load</span>
+                        <i data-lucide="cpu" class="w-4 h-4 text-cyan-400"></i>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-3xl font-black font-mono text-white" id="kpi-cpu-val">48.2</span>
+                        <span class="text-xs font-bold text-slate-400">%</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] pt-1">
+                        <span class="text-slate-300 font-mono">Cores: 1,024 Active</span>
+                        <span id="kpi-cpu-status" class="text-emerald-400 font-bold">Optimal</span>
+                    </div>
+                    <!-- Sparkline Canvas -->
+                    <div class="h-8 w-full mt-2">
+                        <canvas id="sparkline-cpu"></canvas>
+                    </div>
+                </div>
+
+                <!-- KPI 3: SCADA Ingestion Latency -->
+                <div class="grafana-panel p-4 space-y-2 relative overflow-hidden">
+                    <div class="flex justify-between items-start text-xs">
+                        <span class="text-slate-400 font-bold uppercase tracking-wider">Latence Telemetrie SCADA</span>
+                        <i data-lucide="timer" class="w-4 h-4 text-purple-400"></i>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-3xl font-black font-mono text-white" id="kpi-latency-val">4.2</span>
+                        <span class="text-xs font-bold text-slate-400">ms</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] pt-1">
+                        <span class="text-emerald-400 font-bold">P99: 12.8ms</span>
+                        <span class="text-slate-500 font-mono">Gateway: GW-PARIS-02</span>
+                    </div>
+                    <!-- Sparkline Canvas -->
+                    <div class="h-8 w-full mt-2">
+                        <canvas id="sparkline-latency"></canvas>
+                    </div>
+                </div>
+
+                <!-- KPI 4: Prometheus Series -->
+                <div class="grafana-panel p-4 space-y-2 relative overflow-hidden">
+                    <div class="flex justify-between items-start text-xs">
+                        <span class="text-slate-400 font-bold uppercase tracking-wider">Séries PromQL Actives</span>
+                        <i data-lucide="database" class="w-4 h-4 text-amber-400"></i>
+                    </div>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-3xl font-black font-mono text-white" id="kpi-series-val">1.48M</span>
+                        <span class="text-xs font-bold text-slate-400">series</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] pt-1">
+                        <span class="text-slate-300 font-mono">Head Chunk: 420MB</span>
+                        <span class="text-emerald-400 font-bold">TSDB Healthy</span>
+                    </div>
+                    <!-- Sparkline Canvas -->
+                    <div class="h-8 w-full mt-2">
+                        <canvas id="sparkline-series"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Dynamic Grafana Charts Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <!-- Main Chart (2 Cols): SCADA & Telemetry Scrape Latency -->
+                <div class="lg:col-span-2 grafana-panel p-5 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-edf-border pb-3">
+                        <div>
+                            <h3 class="font-extrabold text-white text-sm flex items-center gap-2">
+                                <i data-lucide="activity" class="w-4 h-4 text-edf-orange"></i>
+                                Télémesure Sites de Production & Nœuds Compute (ms)
+                            </h3>
+                            <p class="text-xs text-slate-400">Niveau de latence de collecte Prometheus (`scrape_duration_seconds`)</p>
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px]">
+                            <span class="flex items-center gap-1 text-edf-orange"><span class="w-2.5 h-2.5 rounded-full bg-edf-orange"></span> Flamanville 3 (EPR)</span>
+                            <span class="flex items-center gap-1 text-cyan-400"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> Gravelines N3</span>
+                            <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> Hydro Grand'Maison</span>
+                        </div>
+                    </div>
+                    <div class="h-72 w-full relative">
+                        <canvas id="chart-main-telemetry"></canvas>
+                    </div>
+                </div>
+
+                <!-- Right Chart (1 Col): Energy Production Mix vs Compute Thermals -->
+                <div class="grafana-panel p-5 space-y-4">
+                    <div class="border-b border-edf-border pb-3">
+                        <h3 class="font-extrabold text-white text-sm flex items-center gap-2">
+                            <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i>
+                            Répartition Mix Métriques EDF
+                        </h3>
+                        <p class="text-xs text-slate-400">Volume de séries temporelles collectées</p>
+                    </div>
+                    <div class="h-56 w-full relative flex items-center justify-center">
+                        <canvas id="chart-mix-doughnut"></canvas>
+                    </div>
+                    <div class="text-xs space-y-1.5 pt-2 font-mono">
+                        <div class="flex justify-between text-slate-300">
+                            <span>Nuclear Telemetry:</span>
+                            <strong class="text-edf-orange">54% (800k metrics)</strong>
+                        </div>
+                        <div class="flex justify-between text-slate-300">
+                            <span>Hydro & Renewables:</span>
+                            <strong class="text-emerald-400">26% (385k metrics)</strong>
+                        </div>
+                        <div class="flex justify-between text-slate-300">
+                            <span>SCADA & SmartGrid:</span>
+                            <strong class="text-cyan-400">20% (295k metrics)</strong>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Secondary Row: Network Throughput & Node Thermals -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Chart 3: Network Bandwidth -->
+                <div class="grafana-panel p-5 space-y-4">
+                    <div class="border-b border-edf-border pb-3 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-extrabold text-white text-sm flex items-center gap-2">
+                                <i data-lucide="network" class="w-4 h-4 text-blue-400"></i>
+                                Débit Réseau Bus de Données SCADA (Mbit/s)
+                            </h3>
+                            <p class="text-xs text-slate-400">E/S Réseau `node_network_receive_bytes_total`</p>
+                        </div>
+                        <span class="font-mono text-xs text-blue-400 font-bold bg-blue-500/10 px-2.5 py-1 rounded border border-blue-500/30">In: 842 Mb/s</span>
+                    </div>
+                    <div class="h-60 w-full relative">
+                        <canvas id="chart-network-io"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 4: Server Node Thermals -->
+                <div class="grafana-panel p-5 space-y-4">
+                    <div class="border-b border-edf-border pb-3 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-extrabold text-white text-sm flex items-center gap-2">
+                                <i data-lucide="thermometer" class="w-4 h-4 text-rose-400"></i>
+                                Températures Salles Serveurs DataCenter (°C)
+                            </h3>
+                            <p class="text-xs text-slate-400">Capteurs d'infrastructure Paris-Saclay Pod A & B</p>
+                        </div>
+                        <span id="temp-badge" class="font-mono text-xs text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/30">22.4 °C Avg</span>
+                    </div>
+                    <div class="h-60 w-full relative">
+                        <canvas id="chart-thermals"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- TAB 2: PROMETHEUS TARGETS & PROMQL CONSOLE -->
+        <div id="tab-prometheus" class="hidden space-y-6">
+
+            <!-- PromQL Query Bar Panel -->
+            <div class="grafana-panel p-5 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-edf-border pb-3">
+                    <div class="flex items-center gap-2">
+                        <div class="p-2 bg-edf-orange/20 text-edf-orange rounded-lg">
+                            <i data-lucide="terminal" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-extrabold text-white text-base">Prometheus PromQL Engine</h2>
+                            <p class="text-xs text-slate-400">Exécuteur de requêtes sur les métriques brutes EDF</p>
+                        </div>
+                    </div>
+                    <span class="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full font-mono font-bold">PromQL Evaluator Online</span>
+                </div>
+
+                <!-- Preset PromQL Shortcuts -->
+                <div class="space-y-1.5">
+                    <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Requêtes Métiers Prédéfinies EDF :</span>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="setQuery('edf_nuclear_reactor_temperature_celsius{unit=\&quot;EPR_1\&quot;}')" class="bg-[#11141A] hover:bg-edf-card border border-edf-border text-slate-300 hover:text-edf-orange text-xs font-mono px-3 py-1.5 rounded-lg transition-colors">
+                            edf_nuclear_reactor_temperature_celsius
+                        </button>
+                        <button onclick="setQuery('rate(node_cpu_seconds_total{facility=\&quot;flamanville_3\&quot;}[5m])')" class="bg-[#11141A] hover:bg-edf-card border border-edf-border text-slate-300 hover:text-edf-orange text-xs font-mono px-3 py-1.5 rounded-lg transition-colors">
+                            rate(node_cpu_seconds_total[5m])
+                        </button>
+                        <button onclick="setQuery('edf_hydro_turbine_rpm{site=\&quot;grand_maison\&quot;} > 1400')" class="bg-[#11141A] hover:bg-edf-card border border-edf-border text-slate-300 hover:text-edf-orange text-xs font-mono px-3 py-1.5 rounded-lg transition-colors">
+                            edf_hydro_turbine_rpm > 1400
+                        </button>
+                        <button onclick="setQuery('histogram_quantile(0.99, rate(scada_request_duration_seconds_bucket[5m]))')" class="bg-[#11141A] hover:bg-edf-card border border-edf-border text-slate-300 hover:text-edf-orange text-xs font-mono px-3 py-1.5 rounded-lg transition-colors">
+                            scada_latency_p99
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Query Input Bar -->
+                <div class="flex gap-2">
+                    <div class="flex-1 bg-[#11141A] rounded-xl border border-edf-border p-2 font-mono text-sm flex items-center gap-2 promql-glow">
+                        <span class="text-edf-orange font-bold pl-2">&gt;</span>
+                        <input type="text" id="promql-input" value="edf_nuclear_reactor_temperature_celsius{unit=&quot;EPR_1&quot;}" class="w-full bg-transparent text-white focus:outline-none font-mono text-xs sm:text-sm placeholder-slate-600" placeholder="Saisir une expression PromQL...">
+                    </div>
+                    <button onclick="executePromQL()" class="bg-edf-orange hover:bg-amber-600 text-white font-bold px-6 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-2 text-xs">
+                        <i data-lucide="play" class="w-4 h-4 fill-white"></i>
+                        <span>Exécuter</span>
+                    </button>
+                </div>
+
+                <!-- Query Results Box -->
+                <div class="bg-[#11141A] rounded-xl border border-edf-border p-4 space-y-3">
+                    <div class="flex justify-between items-center text-xs font-mono border-b border-edf-border/60 pb-2">
+                        <span class="text-slate-400">Résultat de la requête : <strong class="text-white" id="result-query-string">edf_nuclear_reactor_temperature_celsius</strong></span>
+                        <span class="text-emerald-400 font-bold" id="result-time-took">Evaluation time: 2.14ms (6 series)</span>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left font-mono text-xs text-slate-300">
+                            <thead class="bg-[#181C24] text-slate-400 border-b border-edf-border">
+                                <tr>
+                                    <th class="p-2.5">Série Temporelle / Labels</th>
+                                    <th class="p-2.5">Timestamp</th>
+                                    <th class="p-2.5 text-right">Valeur</th>
+                                </tr>
+                            </thead>
+                            <tbody id="promql-results-body" class="divide-y divide-edf-border/40">
+                                <!-- Dynamic PromQL Results -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prometheus Targets Table Panel -->
+            <div class="grafana-panel p-5 space-y-4">
+                <div class="flex justify-between items-center border-b border-edf-border pb-3">
+                    <div>
+                        <h3 class="font-extrabold text-white text-base flex items-center gap-2">
+                            <i data-lucide="target" class="w-5 h-5 text-emerald-400"></i>
+                            Cibles de Collecte Prometheus (Scrape Targets)
+                        </h3>
+                        <p class="text-xs text-slate-400">Statut des endpoints de métriques Node-Exporter, SCADA et Kubernetes</p>
+                    </div>
+                    <span class="text-xs font-mono text-slate-400">32/32 Targets Healthy</span>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead class="bg-[#11141A] text-slate-400 border-b border-edf-border">
+                            <tr>
+                                <th class="p-3">Statut</th>
+                                <th class="p-3">Endpoint Target URL</th>
+                                <th class="p-3">Job Name</th>
+                                <th class="p-3">Intervalle</th>
+                                <th class="p-3">Dernier Scrape</th>
+                                <th class="p-3 text-right">Durée Scrape</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-edf-border/50 text-slate-300">
+                            <tr class="hover:bg-edf-card/50">
+                                <td class="p-3"><span class="bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30">UP</span></td>
+                                <td class="p-3 text-white">http://10.142.8.12:9100/metrics</td>
+                                <td class="p-3 text-edf-orange">edf-scada-exporter</td>
+                                <td class="p-3">15s</td>
+                                <td class="p-3">il y a 2s</td>
+                                <td class="p-3 text-right font-bold text-slate-200">14.2 ms</td>
+                            </tr>
+                            <tr class="hover:bg-edf-card/50">
+                                <td class="p-3"><span class="bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30">UP</span></td>
+                                <td class="p-3 text-white">http://10.142.9.45:9090/metrics</td>
+                                <td class="p-3 text-cyan-400">edf-smartgrid-telemetry</td>
+                                <td class="p-3">10s</td>
+                                <td class="p-3">il y a 1s</td>
+                                <td class="p-3 text-right font-bold text-slate-200">8.6 ms</td>
+                            </tr>
+                            <tr class="hover:bg-edf-card/50">
+                                <td class="p-3"><span class="bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30">UP</span></td>
+                                <td class="p-3 text-white">http://10.142.12.102:9100/metrics</td>
+                                <td class="p-3 text-purple-400">edf-kubernetes-nodes</td>
+                                <td class="p-3">15s</td>
+                                <td class="p-3">il y a 4s</td>
+                                <td class="p-3 text-right font-bold text-slate-200">22.1 ms</td>
+                            </tr>
+                            <tr class="hover:bg-edf-card/50">
+                                <td class="p-3"><span class="bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded border border-emerald-500/30">UP</span></td>
+                                <td class="p-3 text-white">http://10.142.15.88:9100/metrics</td>
+                                <td class="p-3 text-amber-400">edf-hydro-sensors</td>
+                                <td class="p-3">30s</td>
+                                <td class="p-3">il y a 12s</td>
+                                <td class="p-3 text-right font-bold text-slate-200">5.4 ms</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- TAB 3: ALERTMANAGER & OPERATIONAL INCIDENTS -->
+        <div id="tab-alerts" class="hidden space-y-6">
+
+            <!-- Alertmanager Header Bar -->
+            <div class="grafana-panel p-5 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4 border-b border-edf-border pb-3">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl">
+                            <i data-lucide="shield-alert" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-extrabold text-white text-base">Alertmanager EDF Ops Center</h2>
+                            <p class="text-xs text-slate-400">Règles de métriques et alertes d'exploitation en temps réel</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <button onclick="triggerTestAlert()" class="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-2">
+                            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+                            <span>Simuler Incident / Test Alerte</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Active Alert Cards Grid -->
+                <div class="space-y-3" id="alerts-container">
+
+                    <!-- Alert Item 1 -->
+                    <div class="bg-[#11141A] border-l-4 border-l-amber-500 border border-edf-border rounded-xl p-4 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div class="flex items-center gap-2">
+                                <span class="bg-amber-500/20 text-amber-400 font-bold px-2.5 py-0.5 rounded border border-amber-500/30 uppercase text-[10px]">Warning</span>
+                                <h4 class="font-extrabold text-white text-sm">HighTurbineVibrationWarning</h4>
+                                <span class="text-slate-500 font-mono">job: edf-hydro-sensors</span>
+                            </div>
+                            <span class="text-slate-400 font-mono">Actif depuis: 14 min</span>
+                        </div>
+                        <p class="text-xs text-slate-300">
+                            La vibration sur la turbine hydroélectrique Grand'Maison T2 dépasse le seuil nominal (> 12.4 mm/s).
+                        </p>
+                        <div class="flex flex-wrap gap-2 text-[11px] font-mono text-slate-400 pt-1">
+                            <span class="bg-[#181C24] px-2 py-0.5 rounded border border-edf-border">site="grand_maison"</span>
+                            <span class="bg-[#181C24] px-2 py-0.5 rounded border border-edf-border">unit="hydro_t2"</span>
+                            <span class="bg-[#181C24] px-2 py-0.5 rounded border border-edf-border">severity="warning"</span>
+                        </div>
+                    </div>
+
+                    <!-- Alert Item 2 -->
+                    <div class="bg-[#11141A] border-l-4 border-l-blue-500 border border-edf-border rounded-xl p-4 space-y-2">
+                        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div class="flex items-center gap-2">
+                                <span class="bg-blue-500/20 text-blue-400 font-bold px-2.5 py-0.5 rounded border border-blue-500/30 uppercase text-[10px]">Info / Notice</span>
+                                <h4 class="font-extrabold text-white text-sm">GridGatewayLatencyHigh</h4>
+                                <span class="text-slate-500 font-mono">job: edf-scada-exporter</span>
+                            </div>
+                            <span class="text-slate-400 font-mono">Actif depuis: 2 min</span>
+                        </div>
+                        <p class="text-xs text-slate-300">
+                            Latence temporaire constatée lors de la collecte sur la passerelle SCADA Paris-Saclay Gateway 04.
+                        </p>
+                        <div class="flex flex-wrap gap-2 text-[11px] font-mono text-slate-400 pt-1">
+                            <span class="bg-[#181C24] px-2 py-0.5 rounded border border-edf-border">gateway="gw_paris_04"</span>
+                            <span class="bg-[#181C24] px-2 py-0.5 rounded border border-edf-border">severity="info"</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Rule Definitions Matrix -->
+            <div class="grafana-panel p-5 space-y-4">
+                <h3 class="font-extrabold text-white text-base border-b border-edf-border pb-3">Matrice des Règles d'Alerte Actives (Prometheus Rules)</h3>
+                
+                <div class="space-y-3 text-xs font-mono">
+                    <div class="p-3 bg-[#11141A] rounded-xl border border-edf-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                            <div class="text-edf-orange font-bold">ReactorTelemetryTimeout</div>
+                            <div class="text-slate-400 text-[11px]">expr: absent(edf_nuclear_reactor_temperature_celsius) == 1</div>
+                        </div>
+                        <span class="bg-rose-500/20 text-rose-400 px-2 py-1 rounded font-bold border border-rose-500/30">FOR: 1m · CRITICAL</span>
+                    </div>
+
+                    <div class="p-3 bg-[#11141A] rounded-xl border border-edf-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <div>
+                            <div class="text-amber-400 font-bold">HighKubernetesMemoryUsage</div>
+                            <div class="text-slate-400 text-[11px]">expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes &gt; 0.88</div>
+                        </div>
+                        <span class="bg-amber-500/20 text-amber-400 px-2 py-1 rounded font-bold border border-amber-500/30">FOR: 5m · WARNING</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- TOAST ALERT NOTIFICATION CONTAINER -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+
+    <!-- JAVASCRIPT SIMULATION & CHART LOGIC -->
+    <script>
+        // Global Application State
+        let currentTab = 'grafana';
+        let systemStress = 35; // Stress level 0 - 100
+        let autoRefreshInterval = null;
+        let isAutoRefresh = true;
+
+        // Chart.js Instances
+        let chartTelemetry, chartDoughnut, chartNetwork, chartThermals;
+        let sparklinePower, sparklineCpu, sparklineLatency, sparklineSeries;
+
+        // Dynamic Data Streams
+        const timeLabels = ['14:35', '14:37', '14:39', '14:41', '14:43', '14:45'];
+        
+        let telemetryData = {
+            flamanville: [12.4, 11.8, 13.1, 12.5, 12.2, 12.8],
+            gravelines: [8.2, 8.5, 9.0, 8.4, 8.1, 8.6],
+            grandmaison: [4.1, 4.3, 4.0, 4.2, 4.5, 4.2]
+        };
+
+        let networkData = {
+            inbound: [740, 780, 810, 790, 820, 842],
+            outbound: [320, 340, 355, 330, 360, 375]
+        };
+
+        let thermalsData = {
+            podA: [21.5, 21.8, 22.1, 22.0, 22.3, 22.4],
+            podB: [23.1, 23.4, 23.8, 23.5, 23.9, 24.1]
+        };
+
+        // Live Clock Updates
+        function updateClock() {
+            const now = new Date();
+            const utcString = now.toISOString().substring(11, 19) + ' UTC';
+            document.getElementById('live-clock').textContent = utcString;
+        }
+
+        // Tab Switching Engine
+        function switchTab(tabId) {
+            currentTab = tabId;
+            ['grafana', 'prometheus', 'alerts'].forEach(t => {
+                const content = document.getElementById(`tab-${t}`);
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if (t === tabId) {
+                    content.classList.remove('hidden');
+                    btn.className = "px-4 py-2 rounded-lg text-xs font-bold transition-all bg-edf-orange text-white flex items-center gap-2 shadow-md";
+                } else {
+                    content.classList.add('hidden');
+                    btn.className = "px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-400 hover:text-white hover:bg-edf-card flex items-center gap-2";
+                }
+            });
+
+            if (tabId === 'prometheus') {
+                executePromQL();
+            }
+        }
+
+        // Environment Switcher Simulator
+        function switchEnvironment(envVal) {
+            showToast('Environnement Modifié', `Bascule de la supervision vers: ${envVal.toUpperCase()}`, 'info');
+            simulateDataTick();
+        }
+
+        // System Stress Controller
+        function updateSystemStress(val) {
+            systemStress = parseInt(val);
+            const badge = document.getElementById('stress-value-badge');
+            
+            if (systemStress < 50) {
+                badge.textContent = `${systemStress}% Normal`;
+                badge.className = "font-mono font-bold text-amber-400 bg-amber-400/10 border border-amber-400/30 px-2 py-0.5 rounded";
+            } else if (systemStress < 80) {
+                badge.textContent = `${systemStress}% Charge Élevée`;
+                badge.className = "font-mono font-bold text-edf-orange bg-edf-orange/10 border border-edf-orange/30 px-2 py-0.5 rounded";
+            } else {
+                badge.textContent = `${systemStress}% Surcharge Critique!`;
+                badge.className = "font-mono font-bold text-rose-400 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded animate-pulse";
+            }
+
+            simulateDataTick();
+        }
+
+        // Initialize Grafana Charts
+        function initGrafanaCharts() {
+            Chart.defaults.color = '#94A3B8';
+            Chart.defaults.font.family = 'JetBrains Mono';
+
+            // 1. Main Telemetry Latency Chart
+            const ctx1 = document.getElementById('chart-main-telemetry').getContext('2d');
+            chartTelemetry = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: timeLabels,
+                    datasets: [
+                        {
+                            label: 'Flamanville 3 (EPR_1)',
+                            data: telemetryData.flamanville,
+                            borderColor: '#FF5F00',
+                            backgroundColor: 'rgba(255, 95, 0, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 4
+                        },
+                        {
+                            label: 'Gravelines N3',
+                            data: telemetryData.gravelines,
+                            borderColor: '#22D3EE',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            pointRadius: 3
+                        },
+                        {
+                            label: 'Hydro Grand\'Maison',
+                            data: telemetryData.grandmaison,
+                            borderColor: '#10B981',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            pointRadius: 3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: 'rgba(42, 48, 63, 0.5)' } },
+                        y: { grid: { color: 'rgba(42, 48, 63, 0.5)' }, title: { display: true, text: 'ms' } }
+                    }
+                }
+            });
+
+            // 2. Mix Metrics Doughnut
+            const ctx2 = document.getElementById('chart-mix-doughnut').getContext('2d');
+            chartDoughnut = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Nuclear Telemetry', 'Hydro & Renewables', 'SCADA SmartGrid'],
+                    datasets: [{
+                        data: [54, 26, 20],
+                        backgroundColor: ['#FF5F00', '#10B981', '#22D3EE'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    cutout: '70%'
+                }
+            });
+
+            // 3. Network Bandwidth
+            const ctx3 = document.getElementById('chart-network-io').getContext('2d');
+            chartNetwork = new Chart(ctx3, {
+                type: 'line',
+                data: {
+                    labels: timeLabels,
+                    datasets: [
+                        {
+                            label: 'Entrant (Rx)',
+                            data: networkData.inbound,
+                            borderColor: '#3B82F6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Sortant (Tx)',
+                            data: networkData.outbound,
+                            borderColor: '#A855F7',
+                            borderWidth: 2,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: 'rgba(42, 48, 63, 0.5)' } },
+                        y: { grid: { color: 'rgba(42, 48, 63, 0.5)' } }
+                    }
+                }
+            });
+
+            // 4. Server Thermals
+            const ctx4 = document.getElementById('chart-thermals').getContext('2d');
+            chartThermals = new Chart(ctx4, {
+                type: 'line',
+                data: {
+                    labels: timeLabels,
+                    datasets: [
+                        {
+                            label: 'DataCenter Pod A',
+                            data: thermalsData.podA,
+                            borderColor: '#F43F5E',
+                            borderWidth: 2,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'DataCenter Pod B',
+                            data: thermalsData.podB,
+                            borderColor: '#F59E0B',
+                            borderWidth: 2,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: 'rgba(42, 48, 63, 0.5)' } },
+                        y: { grid: { color: 'rgba(42, 48, 63, 0.5)' } }
+                    }
+                }
+            });
+
+            // Initialize Sparklines
+            initSparklines();
+        }
+
+        // Sparklines Generator
+        function initSparklines() {
+            const config = {
+                type: 'line',
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                    scales: { x: { display: false }, y: { display: false } },
+                    elements: { point: { radius: 0 } }
+                }
+            };
+
+            sparklinePower = new Chart(document.getElementById('sparkline-power'), { ...config, data: { labels: [1,2,3,4,5,6], datasets: [{ data: [41, 41.5, 42, 42.2, 42.5, 42.85], borderColor: '#FF5F00', borderWidth: 2 }] } });
+            sparklineCpu = new Chart(document.getElementById('sparkline-cpu'), { ...config, data: { labels: [1,2,3,4,5,6], datasets: [{ data: [45, 46, 48, 47, 49, 48.2], borderColor: '#22D3EE', borderWidth: 2 }] } });
+            sparklineLatency = new Chart(document.getElementById('sparkline-latency'), { ...config, data: { labels: [1,2,3,4,5,6], datasets: [{ data: [4.8, 4.5, 4.3, 4.6, 4.1, 4.2], borderColor: '#C084FC', borderWidth: 2 }] } });
+            sparklineSeries = new Chart(document.getElementById('sparkline-series'), { ...config, data: { labels: [1,2,3,4,5,6], datasets: [{ data: [1.42, 1.44, 1.45, 1.46, 1.47, 1.48], borderColor: '#F59E0B', borderWidth: 2 }] } });
+        }
+
+        // Live Data Tick Simulator
+        function simulateDataTick() {
+            const stressFactor = systemStress / 100;
+
+            // Update KPI values dynamically based on stress slider
+            const basePower = (42.0 + (Math.random() * 1.5) + (stressFactor * 3)).toFixed(2);
+            const cpuLoad = (30 + (Math.random() * 10) + (stressFactor * 55)).toFixed(1);
+            const latency = (3.5 + (Math.random() * 1.2) + (stressFactor * 18)).toFixed(1);
+
+            document.getElementById('kpi-power-val').textContent = basePower;
+            document.getElementById('kpi-cpu-val').textContent = cpuLoad;
+            document.getElementById('kpi-latency-val').textContent = latency;
+
+            const cpuStatus = document.getElementById('kpi-cpu-status');
+            if (cpuLoad > 80) {
+                cpuStatus.textContent = "Surcharge!";
+                cpuStatus.className = "text-rose-400 font-bold animate-pulse";
+            } else {
+                cpuStatus.textContent = "Optimal";
+                cpuStatus.className = "text-emerald-400 font-bold";
+            }
+
+            // Push dynamic values to Chart.js
+            if (chartTelemetry) {
+                const nowStr = new Date().toISOString().substring(11, 16);
+                chartTelemetry.data.labels.shift();
+                chartTelemetry.data.labels.push(nowStr);
+
+                chartTelemetry.data.datasets[0].data.shift();
+                chartTelemetry.data.datasets[0].data.push(parseFloat(latency) * 2.8);
+
+                chartTelemetry.data.datasets[1].data.shift();
+                chartTelemetry.data.datasets[1].data.push(parseFloat(latency) * 1.9);
+
+                chartTelemetry.update('none');
+            }
+        }
+
+        // PromQL Query Executing Simulation
+        function setQuery(qStr) {
+            document.getElementById('promql-input').value = qStr;
+            executePromQL();
+        }
+
+        function executePromQL() {
+            const query = document.getElementById('promql-input').value;
+            document.getElementById('result-query-string').textContent = query;
+
+            const tbody = document.getElementById('promql-results-body');
+            tbody.innerHTML = '';
+
+            const nowTs = Math.floor(Date.now() / 1000);
+
+            // Generate realistic metric response rows based on query
+            let mockRows = [];
+
+            if (query.includes('nuclear') || query.includes('EPR')) {
+                mockRows = [
+                    { metric: 'edf_nuclear_reactor_temperature_celsius{facility="flamanville_3", unit="EPR_1"}', val: (304.2 + (systemStress * 0.2)).toFixed(2) + ' °C' },
+                    { metric: 'edf_nuclear_reactor_temperature_celsius{facility="gravelines", unit="N_3"}', val: '298.60 °C' },
+                    { metric: 'edf_nuclear_reactor_temperature_celsius{facility="bugey", unit="B_2"}', val: '295.10 °C' }
+                ];
+            } else if (query.includes('hydro') || query.includes('rpm')) {
+                mockRows = [
+                    { metric: 'edf_hydro_turbine_rpm{site="grand_maison", unit="hydro_t1"}', val: '1450' },
+                    { metric: 'edf_hydro_turbine_rpm{site="grand_maison", unit="hydro_t2"}', val: '1488 (Warning)' },
+                    { metric: 'edf_hydro_turbine_rpm{site="rhone_04", unit="hydro_t1"}', val: '1210' }
+                ];
+            } else {
+                mockRows = [
+                    { metric: 'node_cpu_seconds_total{facility="flamanville_3", mode="idle"}', val: (100 - systemStress).toFixed(1) + '%' },
+                    { metric: 'node_cpu_seconds_total{facility="flamanville_3", mode="system"}', val: (systemStress * 0.4).toFixed(1) + '%' },
+                    { metric: 'node_cpu_seconds_total{facility="flamanville_3", mode="user"}', val: (systemStress * 0.6).toFixed(1) + '%' }
+                ];
+            }
+
+            mockRows.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-edf-card/50 transition-colors";
+                tr.innerHTML = `
+                    <td class="p-2.5 text-edf-orange font-bold">${r.metric}</td>
+                    <td class="p-2.5 text-slate-400">${nowTs}</td>
+                    <td class="p-2.5 text-right font-black text-white">${r.val}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Test Alert Injection
+        function triggerTestAlert() {
+            const container = document.getElementById('alerts-container');
+            const newAlert = document.createElement('div');
+            newAlert.className = "bg-[#11141A] border-l-4 border-l-rose-500 border border-edf-border rounded-xl p-4 space-y-2 animate-bounce";
+            newAlert.innerHTML = `
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div class="flex items-center gap-2">
+                        <span class="bg-rose-500/20 text-rose-400 font-bold px-2.5 py-0.5 rounded border border-rose-500/30 uppercase text-[10px]">Critical</span>
+                        <h4 class="font-extrabold text-white text-sm">ReactorTelemetryTimeoutTest</h4>
+                        <span class="text-slate-500 font-mono">job: edf-scada-exporter</span>
+                    </div>
+                    <span class="text-rose-400 font-mono font-bold">A l'instant</span>
+                </div>
+                <p class="text-xs text-slate-300">
+                    Test d'alerte manuel déclenché : Interruption simulée sur la télémesure réacteur Flamanville EPR_1.
+                </p>
+            `;
+            container.prepend(newAlert);
+
+            showToast('Alerte Critique Simulée', 'ReactorTelemetryTimeoutTest injectée dans Alertmanager', 'error');
+
+            document.getElementById('header-alert-count').textContent = "3 Actives";
+            document.getElementById('header-alert-count').className = "bg-rose-500/20 text-rose-400 font-bold px-1.5 py-0.5 rounded text-[11px] border border-rose-500/30";
+        }
+
+        // Toast Manager
+        function showToast(title, msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let colorBorder = type === 'error' ? 'border-rose-500' : 'border-edf-orange';
+            let icon = type === 'error' ? 'alert-octagon' : 'info';
+
+            toast.className = `pointer-events-auto bg-[#181C24] border-l-4 ${colorBorder} border border-edf-border text-white p-3.5 rounded-xl shadow-2xl space-y-1 max-w-sm font-sans text-xs flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2`;
+            toast.innerHTML = `
+                <div class="p-1.5 rounded-lg bg-[#11141A] text-edf-orange shrink-0">
+                    <i data-lucide="${icon}" class="w-4 h-4"></i>
+                </div>
+                <div>
+                    <div class="font-black text-white">${title}</div>
+                    <div class="text-slate-400">${msg}</div>
+                </div>
+            `;
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.remove();
+            }, 4000);
+        }
+
+        // Time Filter Selector Toggle
+        function setTimeRange(range) {
+            ['15m', '1h', '6h', '24h', '7d'].forEach(r => {
+                const btn = document.getElementById(`time-${r}`);
+                if (r === range) {
+                    btn.className = "px-2.5 py-1 rounded bg-edf-orange text-white font-bold shadow";
+                } else {
+                    btn.className = "px-2.5 py-1 rounded text-slate-400 hover:text-white font-medium";
+                }
+            });
+            showToast('Filtre Temporel', `Plage définie sur les dernières ${range}`, 'info');
+        }
+
+        function toggleAutoRefresh() {
+            isAutoRefresh = !isAutoRefresh;
+            const btn = document.getElementById('refresh-toggle');
+            if (isAutoRefresh) {
+                btn.className = "bg-[#11141A] hover:bg-edf-card border border-edf-border text-emerald-400 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5";
+                btn.innerHTML = `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 animate-spin"></i><span>Live (5s)</span>`;
+            } else {
+                btn.className = "bg-[#11141A] hover:bg-edf-card border border-edf-border text-slate-400 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5";
+                btn.innerHTML = `<i data-lucide="pause" class="w-3.5 h-3.5"></i><span>Pause</span>`;
+            }
+            lucide.createIcons();
+        }
+
+        // Window Onload Startup
+        window.onload = function() {
+            lucide.createIcons();
+            initGrafanaCharts();
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            // Auto refresh telemetry data
+            setInterval(() => {
+                if (isAutoRefresh) {
+                    simulateDataTick();
+                }
+            }, 5000);
+        };
+    </script>
+</body>
+</html>
